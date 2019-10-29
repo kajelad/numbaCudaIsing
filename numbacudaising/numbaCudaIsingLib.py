@@ -2,7 +2,22 @@ import numpy as np
 import numba
 
 
-@numba.vectorize([numba.int32(numba.int32)])
+@numba.vectorize([numba.int32(numba.int32)], nopython=True)
+def log2(n):
+    """
+    fast uint8 Hammard Weight
+
+    :param n: np.uint8
+    :return:  np.uint8
+    """
+    # recursively divide in two, combinig sums by bit shifting and adding
+    n = (n & np.uint8(85)) + ((n >> 1) & np.uint8(85))  # 85=01010101b
+    n = (n & np.uint8(51)) + ((n >> 2) & np.uint8(51))  # 51=00110011b
+    n = (n & np.uint8(15)) + ((n >> 4) & np.uint8(15))  # 15=00001111b
+    return n
+
+
+@numba.vectorize([numba.int32(numba.int32)], nopython=True)
 def log2(n):
     """
     fast integer floor log 2
