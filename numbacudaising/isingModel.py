@@ -73,10 +73,10 @@ class IsingModel():
             )
         ax.imshow(bool_spins, cmap="Greys")
 
-    def calc_all_energies(self):
+    def get_energies(self, gpu_blocksize=6):
         energies = cuda.device_array((self.num_spins,), dtype=np.float64)
         energies[:] = 0
-        ic.calc_energy[self.num_spins >> 3, 8](
+        ic.calc_energy[self.num_spins >> gpu_blocksize, 1 << gpu_blocksize](
             self.spins, self.shape_shifts, self.coupling_indices,
             self.coupling_constants, energies
         )
@@ -87,7 +87,7 @@ class IsingModel():
         rng_states = ncrand.create_xoroshiro128p_states((num,), 1)
         ic.random_flip[num >> 3, 8](self.spins, self.shape_shifts, rng_states)
 
-    def metropolis(self, iterations, seed=None):
+    def metropolis(self, iterations, seed=None, gpu_blocksize=6):
         if seed is None:
             seed = np.random.randint(0, 2 ** 64, dtype=np.uint64)
         offsets = np.zeros((1 << self.num_dim, self.num_dim), dtype=np.bool)
@@ -97,14 +97,13 @@ class IsingModel():
         offsets = cuda.to_device(offsets)
         reduced_blocks = (
                 np.ones(self.num_dim, dtype=np.int32) <<
-                (
-                            self.shape_shifts.copy_to_host() - self.block_shifts.copy_to_host() - 1)
+                (self.shape_shifts.copy_to_host() - self.block_shifts.copy_to_host() - 1)
         )
         total_blocks = np.prod(reduced_blocks)
         rng_states = ncrand.create_xoroshiro128p_states((total_blocks,), seed)
         for iteration in range(iterations):
             for i in range(1 << self.num_dim):
-                ic.metropolis_step[total_blocks >> 6, 64](
+                ic.metropolis_step[total_blocks >> gpu_blocksize, 1 << gpu_blocksize](
                     self.spins, self.shape_shifts,
                     self.temperature, self.field,
                     self.coupling_indices, self.coupling_constants,

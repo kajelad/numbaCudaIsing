@@ -32,29 +32,29 @@ def calc_single_interaction_energy(
     num_neighbors = coupling_constants.size
     for n_index in range(num_neighbors):
         other_index = 0
-        for a in range(num_dim):
-            other_index <<= shape_shifts[a]
-            other_index += (
-                    coupling_indices[n_index, a] +
-                    (index & ((1 << shape_shifts[a]) - 1)) &
-                    ((1 << shape_shifts[a]) - 1)
-            )
-        this_spin = 2 * ((spins[index >> 3] >> (index & 7)) & 1) - 1
-        other_spin = 2 * (
-                    (spins[other_index >> 3] >> (other_index & 7)) & 1) - 1
+        shift = 0
+        for a in range(num_dim - 1, -1, -1):
+            single_index = index >> shift
+            single_index += coupling_indices[n_index, a]
+            single_index &= (1 << shape_shifts[a]) - 1
+            other_index += single_index << shift
+            shift += shape_shifts[a]
+        this_spin = 2 * np.float64((spins[index >> 3] >> (index & 7)) & 1) - 1
+        other_spin = 2 * np.float64(
+            (spins[other_index >> 3] >> (other_index & 7)) & 1
+        ) - 1
         energy += coupling_constants[n_index] * this_spin * other_spin
     return energy
 
 
 @cuda.jit
-def calc_energy(spins, shape_shifts, coupling_indices, coupling_constants,
-                energies):
+def calc_energy(
+        spins, shape_shifts, coupling_indices, coupling_constants, energies
+):
     index = cuda.blockDim.x * cuda.blockIdx.x + cuda.threadIdx.x
-    energies[index] += calc_single_interaction_energy(
+    energies[index] += 0.5 * calc_single_interaction_energy(
         index, spins, shape_shifts, coupling_indices, coupling_constants
     )
-    energies[index] += pm * ncrand.xoroshiro128p_uniform_float64(rng_states,
-                                                                 index)
 
 
 @cuda.jit
@@ -101,27 +101,21 @@ def metropolis_step(
     for a in range(num_dim - 1, -1, -1):
         spin_index <<= shape_shifts[a]
         spin_index += (
-                (temp_index & (
-                            (1 << shape_shifts[a] - block_shifts[a] - 1) - 1))
+                (temp_index & ((1 << (shape_shifts[a] - block_shifts[a] - 1)) - 1))
                 << (block_shifts[a] + 1)
         )
         spin_index += np.int64(offsets[a]) << block_shifts[a]
-        spin_index += np.int64(
-            ncrand.xoroshiro128p_uniform_float64(rng_states, thread_index) *
-            (1 << block_shifts[a])
-        )
-        temp_index >>= block_shifts[a] + 1
+        spin_index += rng_states[thread_index]["s0"] & ((1 << block_shifts[a]) - 1)
+        ncrand.xoroshiro128p_next(rng_states, thread_index)
+        temp_index >>= shape_shifts[a] - block_shifts[a] - 1
 
     delta_E = -2 * calc_single_interaction_energy(
         spin_index, spins, shape_shifts, coupling_indices, coupling_constants
     )
     this_spin = (spins[spin_index >> 3] >> (spin_index & 7)) & 1
     delta_E -= 2 * field * this_spin
-    """
     if (
             ncrand.xoroshiro128p_uniform_float64(rng_states, thread_index) <
             math.exp(-delta_E / temperature)
     ):
-    """
-    if True:
         spins[spin_index >> 3] ^= 1 << (spin_index & 7)

@@ -2,8 +2,8 @@ import numpy as np
 import numba
 
 
-@numba.vectorize([numba.int32(numba.int32)], nopython=True)
-def log2(n):
+@numba.vectorize([numba.int32(numba.uint8)], nopython=True)
+def hammard(n):
     """
     fast uint8 Hammard Weight
 
